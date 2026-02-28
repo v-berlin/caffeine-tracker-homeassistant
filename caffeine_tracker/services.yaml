@@ -1,0 +1,19 @@
+add_custom_dose:
+  description: "Fügt eine selbstdefinierte Koffein-Dosis hinzu."
+  fields:
+    amount_mg:
+      description: "Koffeinmenge in mg"
+      example: 80
+
+add_preset:
+  description: "Fügt eine Dosis aus einem vordefinierten Preset hinzu."
+  fields:
+    preset_name:
+      description: "Name des Presets"
+      example: "espresso"
+    quantity:
+      description: "Anzahl"
+      example: 2
+
+reset_day:
+  description: "Setzt alle Tageswerte, Sensoren und Dosen auf 0."

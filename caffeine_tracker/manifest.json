@@ -1,0 +1,11 @@
+{
+  "domain": "caffeine_tracker",
+  "name": "Caffeine Tracker",
+  "version": "1.0.0",
+  "requirements": [],
+  "config_flow": true,
+  "documentation": "",
+  "dependencies": [],
+  "iot_class": "local_polling",
+  "homeassistant": "2024.0.0"
+}

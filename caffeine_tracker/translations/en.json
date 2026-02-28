@@ -1,0 +1,10 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Caffeine Tracker",
+        "description": "Set your caffeine tracker preferences"
+      }
+    }
+  }
+}
