@@ -30,7 +30,7 @@ input_text:
   caffeine_dose_log:
     name: "Caffeine Dose Log"
     initial: "[]"
-    max: 10000
+    max: 255
     icon: mdi:format-list-bulleted
 
 template:
