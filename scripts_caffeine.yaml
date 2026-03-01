@@ -14,7 +14,7 @@ script:
   # Variables:
   #   amount  (number, mg)  – dose to add; ignored if ≤ 0
   # ---------------------------------------------------------------------------
-  caffeine_add_custom:
+  - id: caffeine_add_custom
     alias: "Caffeine – Add Custom Dose"
     mode: queued
     max: 5
@@ -59,7 +59,7 @@ script:
   #   preset_name  (string)  – espresso | coffee | energy | cola
   #   quantity     (number)  – multiplier, default 1
   # ---------------------------------------------------------------------------
-  caffeine_add_preset:
+  - id: caffeine_add_preset
     alias: "Caffeine – Add Preset Dose"
     mode: queued
     max: 5
@@ -88,7 +88,7 @@ script:
   # caffeine_reset_day
   # Erase all today's doses and reset the peak counter.
   # ---------------------------------------------------------------------------
-  caffeine_reset_day:
+  - id: caffeine_reset_day
     alias: "Caffeine – Reset Day"
     mode: single
     sequence:
@@ -114,7 +114,7 @@ script:
   # caffeine_export_csv
   # Write /config/caffeine_export.csv (columns: timestamp, amount).
   # ---------------------------------------------------------------------------
-  caffeine_export_csv:
+  - id: caffeine_export_csv
     alias: "Caffeine – Export CSV"
     mode: single
     sequence:
