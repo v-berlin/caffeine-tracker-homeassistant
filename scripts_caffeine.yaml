@@ -1,0 +1,99 @@
+caffeine_add_custom:
+  alias: "Caffeine: Add Custom Amount"
+  description: "Add a custom caffeine dose (mg) to today's log."
+  fields:
+    amount:
+      description: "Amount of caffeine in mg"
+      example: 80
+  sequence:
+    - variables:
+        current_log: >
+          {% set raw = states('input_text.caffeine_dose_log') | default('[]') %}
+          {% if raw | length > 2 %}
+            {{ raw | from_json }}
+          {% else %}
+            {{ [] }}
+          {% endif %}
+        new_entry: >
+          {{ {'amount': amount | float, 'timestamp': now().strftime('%Y-%m-%dT%H:%M:%S')} }}
+        updated_log: >
+          {{ (current_log + [new_entry]) | tojson }}
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.caffeine_dose_log
+      data:
+        value: "{{ updated_log }}"
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.caffeine_last_added_amount
+      data:
+        value: "{{ amount | float }}"
+
+caffeine_add_preset:
+  alias: "Caffeine: Add Preset Drink"
+  description: "Add a preset drink's caffeine to today's log."
+  fields:
+    preset_name:
+      description: "Preset drink name: espresso, coffee, energy, cola"
+      example: espresso
+    quantity:
+      description: "Number of drinks (default: 1)"
+      example: 1
+  sequence:
+    - variables:
+        qty: "{{ quantity | default(1) | float(1) }}"
+        preset_mg: >
+          {% set presets = {
+            'espresso': 80,
+            'coffee': 120,
+            'energy': 200,
+            'cola': 35
+          } %}
+          {{ presets.get(preset_name | lower, 0) }}
+        total_mg: "{{ preset_mg | float * qty }}"
+    - condition: template
+      value_template: "{{ preset_mg | float > 0 }}"
+    - service: script.caffeine_add_custom
+      data:
+        amount: "{{ total_mg }}"
+
+caffeine_reset_day:
+  alias: "Caffeine: Reset Day"
+  description: "Reset the caffeine dose log and peak for a new day."
+  sequence:
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.caffeine_dose_log
+      data:
+        value: "[]"
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.caffeine_last_added_amount
+      data:
+        value: 0
+
+caffeine_export_csv:
+  alias: "Caffeine: Export CSV"
+  description: "Export today's caffeine dose log as CSV content in a persistent notification."
+  sequence:
+    - variables:
+        log_raw: "{{ states('input_text.caffeine_dose_log') | default('[]') }}"
+        doses: >
+          {% if log_raw | length > 2 %}
+            {{ log_raw | from_json }}
+          {% else %}
+            {{ [] }}
+          {% endif %}
+        csv_rows: >
+          {% set ns = namespace(rows='timestamp,amount_mg\n') %}
+          {% for dose in doses %}
+            {% set ns.rows = ns.rows ~ dose.timestamp ~ ',' ~ dose.amount ~ '\n' %}
+          {% endfor %}
+          {{ ns.rows }}
+    - service: notify.persistent_notification
+      data:
+        title: "Caffeine Export"
+        message: >
+          CSV export (copy manually to /config/caffeine_export.csv):
+
+          {{ csv_rows }}
