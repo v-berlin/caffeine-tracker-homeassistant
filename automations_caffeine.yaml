@@ -1,0 +1,98 @@
+# =============================================================================
+# automations_caffeine.yaml
+# Caffeine Tracker – Automations
+#
+# Include via packages (see package_caffeine.yaml for full instructions).
+# =============================================================================
+
+automation:
+
+  # ---------------------------------------------------------------------------
+  # 1. Minutely Update
+  #    • Syncs the half-life file so command_line sensors pick up changes
+  #    • Refreshes both command_line sensors
+  #    • Keeps caffeine_peak_today up-to-date
+  # ---------------------------------------------------------------------------
+  - id: caffeine_minutely_update
+    alias: "Caffeine – Minutely Update"
+    description: "Refresh sensors and sync settings every minute."
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    action:
+
+      # Keep /config/caffeine_halflife.txt in sync with the input_number
+      - service: shell_command.caffeine_write_halflife
+
+      # Force both command_line sensors to recalculate
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.caffeine_current_level_mg
+            - sensor.caffeine_time_until_zero
+
+      # Update today's peak if the current level exceeds it
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.caffeine_peak_today
+        data:
+          value: >
+            {% set current = states('sensor.caffeine_current_level_mg') | float(0) %}
+            {% set peak    = states('input_number.caffeine_peak_today')  | float(0) %}
+            {{ [current, peak] | max }}
+
+  # ---------------------------------------------------------------------------
+  # 2. Midnight Reset
+  #    Clears the log and resets peak at 00:00 every day.
+  # ---------------------------------------------------------------------------
+  - id: caffeine_midnight_reset
+    alias: "Caffeine – Midnight Reset"
+    description: "Erase daily log and peak at midnight."
+    trigger:
+      - platform: time
+        at: "00:00:00"
+    action:
+      - service: script.caffeine_reset_day
+
+  # ---------------------------------------------------------------------------
+  # 3. Warning – Daily Goal Exceeded
+  #    Fires once when the current level first crosses the configured goal.
+  # ---------------------------------------------------------------------------
+  - id: caffeine_goal_exceeded_warning
+    alias: "Caffeine – Goal Exceeded Warning"
+    description: "Notify when daily caffeine goal is exceeded."
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.caffeine_current_level_mg
+        above: "{{ states('input_number.caffeine_daily_goal') | float(400) }}"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "☕ Caffeine Goal Exceeded"
+          message: >
+            Your current caffeine level is
+            {{ states('sensor.caffeine_current_level_mg') }} mg,
+            which exceeds your daily goal of
+            {{ states('input_number.caffeine_daily_goal') | int }} mg.
+          notification_id: caffeine_goal_exceeded
+
+  # ---------------------------------------------------------------------------
+  # 4. Warning – High Level (> 400 mg)
+  #    Fires once when the current level first crosses 400 mg.
+  # ---------------------------------------------------------------------------
+  - id: caffeine_high_level_warning
+    alias: "Caffeine – High Level Warning (> 400 mg)"
+    description: "Notify when caffeine level exceeds 400 mg."
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.caffeine_current_level_mg
+        above: 400
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "⚠️ High Caffeine Level"
+          message: >
+            Warning: your caffeine level has reached
+            {{ states('sensor.caffeine_current_level_mg') }} mg (> 400 mg).
+            Consider waiting before your next dose.
+          notification_id: caffeine_high_level

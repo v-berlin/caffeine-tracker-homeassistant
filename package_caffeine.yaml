@@ -1,0 +1,256 @@
+# =============================================================================
+# package_caffeine.yaml
+# Caffeine Tracker – Home Assistant Package
+#
+# Installation:
+#   1. Place this file in /config/packages/package_caffeine.yaml
+#   2. Place scripts_caffeine.yaml  in /config/packages/scripts_caffeine.yaml
+#   3. Place automations_caffeine.yaml in /config/packages/automations_caffeine.yaml
+#   4. Add to configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   5. Restart Home Assistant
+#
+# Data file: /config/caffeine_log.json
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Input Helpers
+# ---------------------------------------------------------------------------
+input_number:
+
+  caffeine_half_life_hours:
+    name: "Caffeine Half-Life"
+    min: 1
+    max: 24
+    step: 0.1
+    initial: 5
+    unit_of_measurement: "h"
+    icon: mdi:clock-time-five-outline
+    mode: slider
+
+  caffeine_daily_goal:
+    name: "Caffeine Daily Goal"
+    min: 50
+    max: 1000
+    step: 10
+    initial: 400
+    unit_of_measurement: "mg"
+    icon: mdi:target
+    mode: slider
+
+  caffeine_peak_today:
+    name: "Caffeine Peak Today"
+    min: 0
+    max: 5000
+    step: 0.1
+    initial: 0
+    unit_of_measurement: "mg"
+    icon: mdi:chart-bell-curve
+    mode: box
+
+  # Internal helper: bridges script variables → shell_command templates
+  caffeine_amount_input:
+    name: "Caffeine Amount Input (internal)"
+    min: 0
+    max: 5000
+    step: 0.1
+    initial: 0
+    unit_of_measurement: "mg"
+    icon: mdi:coffee
+    mode: box
+
+# ---------------------------------------------------------------------------
+# Shell Commands
+# ---------------------------------------------------------------------------
+shell_command:
+
+  # Persist the current half-life setting so command_line sensors can read it
+  caffeine_write_halflife: >-
+    echo "{{ states('input_number.caffeine_half_life_hours') }}" >
+    /config/caffeine_halflife.txt
+
+  # Append one dose entry to the JSON log (amount read from input_number).
+  # Jinja2 renders the values into shell environment variables; the heredoc
+  # is single-quoted so the Python code itself is never processed by Jinja2.
+  # Python reads the values from os.environ, keeping the shell layer safe
+  # regardless of special characters in the rendered values.
+  caffeine_append_dose: |
+    CAFFEINE_AMOUNT="{{ states('input_number.caffeine_amount_input') | float(0) }}" \
+    CAFFEINE_TS="{{ now().strftime('%Y-%m-%dT%H:%M:%S') }}" \
+    python3 << 'PYEOF'
+    import json, os
+    f = '/config/caffeine_log.json'
+    try:
+        raw = open(f).read().strip() if os.path.exists(f) else ''
+        data = json.loads(raw) if raw else []
+        if not isinstance(data, list):
+            data = []
+    except Exception:
+        data = []
+    try:
+        amount = float(os.environ.get('CAFFEINE_AMOUNT', '0') or '0')
+    except ValueError:
+        amount = 0.0
+    ts = os.environ.get('CAFFEINE_TS', '')
+    if amount > 0 and ts:
+        entry = dict(amount=amount, timestamp=ts)
+        data.append(entry)
+        tmp = f + '.tmp'
+        with open(tmp, 'w') as fp:
+            fp.write(json.dumps(data, indent=2))
+        os.replace(tmp, f)
+    PYEOF
+
+  # Overwrite the log with an empty array (midnight reset / manual reset)
+  caffeine_reset_log: |
+    python3 << 'PYEOF'
+    import json, os
+    f = '/config/caffeine_log.json'
+    tmp = f + '.tmp'
+    with open(tmp, 'w') as fp:
+        json.dump([], fp)
+    os.replace(tmp, f)
+    PYEOF
+
+  # Export log to CSV
+  caffeine_export_csv: |
+    python3 << 'PYEOF'
+    import json, os
+    f = '/config/caffeine_log.json'
+    try:
+        raw = open(f).read().strip() if os.path.exists(f) else ''
+        data = json.loads(raw) if raw else []
+        if not isinstance(data, list):
+            data = []
+    except Exception:
+        data = []
+    with open('/config/caffeine_export.csv', 'w') as out:
+        out.write('timestamp,amount\n')
+        for row in data:
+            if isinstance(row, dict):
+                ts  = row.get('timestamp', '')
+                amt = row.get('amount', 0)
+                out.write('%s,%s\n' % (ts, amt))
+    PYEOF
+
+# ---------------------------------------------------------------------------
+# Command-Line Sensors  (not Jinja2-templated → single-quoted heredoc)
+#
+# Note: the decay logic is intentionally duplicated between the two sensors
+# because the spec prohibits external Python files. Both sensors share the
+# same file-reading and calculation code with only the final output differing.
+# ---------------------------------------------------------------------------
+sensor:
+
+  # Current caffeine level [mg] – full exponential decay across all doses
+  - platform: command_line
+    name: "caffeine_current_level_mg"
+    unique_id: caffeine_current_level_mg
+    unit_of_measurement: "mg"
+    scan_interval: 60
+    command: |
+      python3 << 'PYEOF'
+      import json, math, datetime, os
+      f    = '/config/caffeine_log.json'
+      hl_f = '/config/caffeine_halflife.txt'
+      try:
+          raw  = open(f).read().strip() if os.path.exists(f) else ''
+          data = json.loads(raw) if raw else []
+          if not isinstance(data, list):
+              data = []
+      except Exception:
+          data = []
+      hl = 5.0
+      try:
+          hl = float(open(hl_f).read().strip())
+          if hl <= 0:
+              hl = 5.0
+      except Exception:
+          pass
+      now   = datetime.datetime.now()
+      total = 0.0
+      for dose in data:
+          try:
+              ts      = datetime.datetime.fromisoformat(dose.get('timestamp', ''))
+              elapsed = (now - ts).total_seconds() / 3600.0
+              contrib = float(dose.get('amount', 0)) * (0.5 ** (elapsed / hl))
+              total  += max(0.0, contrib)
+          except Exception:
+              pass
+      print(round(max(0.0, total), 1))
+      PYEOF
+
+  # Hours until current level drops below 1 mg
+  - platform: command_line
+    name: "caffeine_time_until_zero"
+    unique_id: caffeine_time_until_zero
+    unit_of_measurement: "h"
+    scan_interval: 60
+    command: |
+      python3 << 'PYEOF'
+      import json, math, datetime, os
+      f    = '/config/caffeine_log.json'
+      hl_f = '/config/caffeine_halflife.txt'
+      try:
+          raw  = open(f).read().strip() if os.path.exists(f) else ''
+          data = json.loads(raw) if raw else []
+          if not isinstance(data, list):
+              data = []
+      except Exception:
+          data = []
+      hl = 5.0
+      try:
+          hl = float(open(hl_f).read().strip())
+          if hl <= 0:
+              hl = 5.0
+      except Exception:
+          pass
+      now   = datetime.datetime.now()
+      total = 0.0
+      for dose in data:
+          try:
+              ts      = datetime.datetime.fromisoformat(dose.get('timestamp', ''))
+              elapsed = (now - ts).total_seconds() / 3600.0
+              contrib = float(dose.get('amount', 0)) * (0.5 ** (elapsed / hl))
+              total  += max(0.0, contrib)
+          except Exception:
+              pass
+      total = max(0.0, total)
+      if total < 1.0:
+          print(0)
+      else:
+          # Solve: total * 0.5^(t/hl) = 1  →  t = hl * log2(total)
+          print(round(hl * math.log2(total), 1))
+      PYEOF
+
+# ---------------------------------------------------------------------------
+# Template Sensors  (derived from command_line sensors + input_numbers)
+# ---------------------------------------------------------------------------
+template:
+  - sensor:
+
+      # Remaining mg until daily goal is met (floor 0)
+      - name: "caffeine_remaining_to_goal"
+        unique_id: caffeine_remaining_to_goal
+        unit_of_measurement: "mg"
+        icon: mdi:progress-check
+        state: >
+          {% set current = states('sensor.caffeine_current_level_mg') | float(0) %}
+          {% set goal    = states('input_number.caffeine_daily_goal')  | float(400) %}
+          {{ [goal - current, 0] | max | round(1) }}
+
+      # Status string
+      - name: "caffeine_status"
+        unique_id: caffeine_status
+        icon: mdi:alert-circle-outline
+        state: >
+          {% set current = states('sensor.caffeine_current_level_mg') | float(0) %}
+          {% set goal    = states('input_number.caffeine_daily_goal')  | float(400) %}
+          {% if current > 400 %}
+            High
+          {% elif current > goal %}
+            Goal exceeded
+          {% else %}
+            OK
+          {% endif %}
