@@ -1,0 +1,121 @@
+# =============================================================================
+# scripts_caffeine.yaml
+# Caffeine Tracker – Scripts
+#
+# Include via packages (see package_caffeine.yaml for full instructions).
+# =============================================================================
+
+script:
+
+  # ---------------------------------------------------------------------------
+  # caffeine_add_custom
+  # Add an arbitrary caffeine dose.
+  #
+  # Variables:
+  #   amount  (number, mg)  – dose to add; ignored if ≤ 0
+  # ---------------------------------------------------------------------------
+  caffeine_add_custom:
+    alias: "Caffeine – Add Custom Dose"
+    mode: queued
+    max: 5
+    variables:
+      amount: 0
+    sequence:
+
+      # Guard: skip zero / negative amounts
+      - condition: template
+        value_template: "{{ (amount | float(0)) > 0 }}"
+
+      # Stage the amount for the shell command (shell_command templates read HA state)
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.caffeine_amount_input
+        data:
+          value: "{{ amount | float(0) }}"
+
+      # Write the new dose to /config/caffeine_log.json
+      - service: shell_command.caffeine_append_dose
+
+      # Force an immediate sensor refresh so peak comparison is up-to-date
+      - service: homeassistant.update_entity
+        target:
+          entity_id: sensor.caffeine_current_level_mg
+
+      # Update today's peak if the new reading is higher
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.caffeine_peak_today
+        data:
+          value: >
+            {% set current = states('sensor.caffeine_current_level_mg') | float(0) %}
+            {% set peak    = states('input_number.caffeine_peak_today')  | float(0) %}
+            {{ [current, peak] | max }}
+
+  # ---------------------------------------------------------------------------
+  # caffeine_add_preset
+  # Add a named preset multiplied by an optional quantity.
+  #
+  # Variables:
+  #   preset_name  (string)  – espresso | coffee | energy | cola
+  #   quantity     (number)  – multiplier, default 1
+  # ---------------------------------------------------------------------------
+  caffeine_add_preset:
+    alias: "Caffeine – Add Preset Dose"
+    mode: queued
+    max: 5
+    variables:
+      preset_name: "espresso"
+      quantity: 1
+    sequence:
+
+      # Resolve preset → mg and multiply by quantity
+      - variables:
+          preset_amount: >
+            {% set presets = {
+                'espresso': 80,
+                'coffee':  120,
+                'energy':  200,
+                'cola':     35
+            } %}
+            {{ (presets.get(preset_name, 0) | float(0)) * (quantity | float(1)) }}
+
+      # Delegate to caffeine_add_custom
+      - service: script.caffeine_add_custom
+        data:
+          amount: "{{ preset_amount }}"
+
+  # ---------------------------------------------------------------------------
+  # caffeine_reset_day
+  # Erase all today's doses and reset the peak counter.
+  # ---------------------------------------------------------------------------
+  caffeine_reset_day:
+    alias: "Caffeine – Reset Day"
+    mode: single
+    sequence:
+
+      # Overwrite log file with []
+      - service: shell_command.caffeine_reset_log
+
+      # Reset peak to 0
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.caffeine_peak_today
+        data:
+          value: 0
+
+      # Force sensor refresh so the UI reflects 0 immediately
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.caffeine_current_level_mg
+            - sensor.caffeine_time_until_zero
+
+  # ---------------------------------------------------------------------------
+  # caffeine_export_csv
+  # Write /config/caffeine_export.csv (columns: timestamp, amount).
+  # ---------------------------------------------------------------------------
+  caffeine_export_csv:
+    alias: "Caffeine – Export CSV"
+    mode: single
+    sequence:
+      - service: shell_command.caffeine_export_csv
