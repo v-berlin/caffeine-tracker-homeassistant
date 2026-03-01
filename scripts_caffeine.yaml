@@ -8,21 +8,17 @@ caffeine_add_custom:
   sequence:
     - variables:
         current_log: >
-          {% set raw = states('input_text.caffeine_dose_log') | default('[]') %}
-          {% if raw | length > 2 %}
-            {{ raw | from_json }}
-          {% else %}
-            {{ [] }}
-          {% endif %}
+          {{ state_attr('sensor.caffeine_dose_log', 'doses') or [] }}
         new_entry: >
           {{ {'amount': amount | float, 'timestamp': now().strftime('%Y-%m-%dT%H:%M:%S')} }}
-        updated_log: >
-          {{ (current_log + [new_entry]) | tojson }}
-    - service: input_text.set_value
-      target:
-        entity_id: input_text.caffeine_dose_log
+        updated_log_json: >
+          {{ {'doses': current_log + [new_entry]} | tojson }}
+    - service: shell_command.caffeine_write_log
       data:
-        value: "{{ updated_log }}"
+        log_json: "{{ updated_log_json }}"
+    - service: homeassistant.update_entity
+      target:
+        entity_id: sensor.caffeine_dose_log
     - service: input_number.set_value
       target:
         entity_id: input_number.caffeine_last_added_amount
@@ -61,11 +57,12 @@ caffeine_reset_day:
   alias: "Caffeine: Reset Day"
   description: "Reset the caffeine dose log and peak for a new day."
   sequence:
-    - service: input_text.set_value
-      target:
-        entity_id: input_text.caffeine_dose_log
+    - service: shell_command.caffeine_write_log
       data:
-        value: "[]"
+        log_json: '{"doses": []}'
+    - service: homeassistant.update_entity
+      target:
+        entity_id: sensor.caffeine_dose_log
     - service: input_number.set_value
       target:
         entity_id: input_number.caffeine_last_added_amount
@@ -77,13 +74,8 @@ caffeine_export_csv:
   description: "Export today's caffeine dose log as CSV content in a persistent notification."
   sequence:
     - variables:
-        log_raw: "{{ states('input_text.caffeine_dose_log') | default('[]') }}"
         doses: >
-          {% if log_raw | length > 2 %}
-            {{ log_raw | from_json }}
-          {% else %}
-            {{ [] }}
-          {% endif %}
+          {{ state_attr('sensor.caffeine_dose_log', 'doses') or [] }}
         csv_rows: >
           {% set ns = namespace(rows='timestamp,amount_mg\n') %}
           {% for dose in doses %}

@@ -26,12 +26,18 @@ input_number:
     mode: box
     icon: mdi:coffee
 
-input_text:
-  caffeine_dose_log:
-    name: "Caffeine Dose Log"
-    initial: "[]"
-    max: 10000
-    icon: mdi:format-list-bulleted
+command_line:
+  - sensor:
+      name: caffeine_dose_log
+      unique_id: caffeine_dose_log
+      command: "cat /config/caffeine_dose_log.json 2>/dev/null || echo '{\"doses\": []}'"
+      scan_interval: 10
+      value_template: "{{ value_json.doses | length }}"
+      json_attributes:
+        - doses
+
+shell_command:
+  caffeine_write_log: "printf '%s' '{{ log_json }}' > /config/caffeine_dose_log.json.tmp && mv /config/caffeine_dose_log.json.tmp /config/caffeine_dose_log.json"
 
 template:
   - sensor:
@@ -41,12 +47,11 @@ template:
         state_class: measurement
         icon: mdi:coffee
         state: >
-          {% set log_raw = states('input_text.caffeine_dose_log') | default('[]') %}
+          {% set doses = state_attr('sensor.caffeine_dose_log', 'doses') or [] %}
           {% set half_life = states('input_number.caffeine_half_life_hours') | float(5) %}
           {% if half_life <= 0 %}
             {% set half_life = 5 %}
           {% endif %}
-          {% set doses = log_raw | from_json if log_raw | length > 2 else [] %}
           {% set ns = namespace(total=0.0) %}
           {% for dose in doses %}
             {% set ts = dose.timestamp %}
